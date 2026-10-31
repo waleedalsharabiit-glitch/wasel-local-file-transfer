@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
@@ -9,12 +10,27 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 class TransferServer extends ChangeNotifier {
-  TransferServer._();
+  TransferServer._({this._testDirectory, this._testBindAddress});
+
+  @visibleForTesting
+  TransferServer.forTesting({
+    required Directory directory,
+    InternetAddress? bindAddress,
+  }) : this._(
+         testDirectory: directory,
+         testBindAddress: bindAddress ?? InternetAddress.loopbackIPv4,
+       );
 
   static final TransferServer instance = TransferServer._();
 
   HttpServer? _server;
   Directory? _directory;
+  final Directory? _testDirectory;
+  final InternetAddress? _testBindAddress;
+  Directory? _partialDirectory;
+  static const int chunkSize = 4 * 1024 * 1024;
+  final Map<String, _PendingTransfer> _pendingTransfers = {};
+  final Set<String> _activeTransferWrites = {};
 
   String? _token;
   String? _url;
@@ -27,9 +43,28 @@ class TransferServer extends ChangeNotifier {
   String? get address => _address;
   int? get port => _port;
 
+  File localFile(String name) {
+    final directory = _directory;
+    if (directory == null) {
+      throw StateError('Start the transfer server first.');
+    }
+    return File('${directory.path}/${_safeName(name)}');
+  }
+
   List<Map<String, Object?>> files = [];
+  final List<Map<String, Object?>> activity = [];
 
   String? lastError;
+
+  void _recordActivity(String action, String name, int bytes) {
+    activity.insert(0, {
+      'action': action,
+      'name': name,
+      'size': bytes,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    if (activity.length > 100) activity.removeRange(100, activity.length);
+  }
 
   Future<void> start() async {
     if (isRunning) return;
@@ -37,37 +72,49 @@ class TransferServer extends ChangeNotifier {
     lastError = null;
 
     try {
-      final documents = await getApplicationDocumentsDirectory();
-      final directory = Directory('${documents.path}/WaselTransfers');
+      final directory =
+          _testDirectory ??
+          Directory(
+            '${(await getApplicationDocumentsDirectory()).path}/WaselTransfers',
+          );
 
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
 
       _directory = directory;
+      final partialDirectory = Directory('${directory.path}/.partials');
+      await partialDirectory.create(recursive: true);
+      _partialDirectory = partialDirectory;
+      await _loadPendingTransfers();
 
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-        includeLoopback: false,
-      );
-
-      final addresses = interfaces
-          .expand((interface) => interface.addresses)
-          .where(
-            (address) =>
-                address.type == InternetAddressType.IPv4 &&
-                !address.isLoopback &&
-                !address.address.startsWith('169.254.'),
-          )
-          .toList();
-
-      if (addresses.isEmpty) {
-        throw Exception(
-          'No local IPv4 address found. Connect the phone to Wi-Fi or enable its hotspot.',
+      final InternetAddress selectedBindAddress;
+      final String selectedAddress;
+      if (_testBindAddress != null) {
+        selectedBindAddress = _testBindAddress;
+        selectedAddress = _testBindAddress.address;
+      } else {
+        final interfaces = await NetworkInterface.list(
+          type: InternetAddressType.IPv4,
+          includeLoopback: false,
         );
+        final addresses = interfaces
+            .expand((interface) => interface.addresses)
+            .where(
+              (address) =>
+                  address.type == InternetAddressType.IPv4 &&
+                  !address.isLoopback &&
+                  !address.address.startsWith('169.254.'),
+            )
+            .toList();
+        if (addresses.isEmpty) {
+          throw Exception(
+            'No local IPv4 address found. Connect the phone to Wi-Fi or enable its hotspot.',
+          );
+        }
+        selectedBindAddress = InternetAddress.anyIPv4;
+        selectedAddress = addresses.first.address;
       }
-
-      final selectedAddress = addresses.first.address;
 
       final random = Random.secure();
       final tokenBytes = List<int>.generate(24, (_) => random.nextInt(256));
@@ -76,7 +123,7 @@ class TransferServer extends ChangeNotifier {
           .join();
 
       final server = await HttpServer.bind(
-        InternetAddress.anyIPv4,
+        selectedBindAddress,
         0,
         shared: false,
       );
@@ -137,7 +184,36 @@ class TransferServer extends ChangeNotifier {
     response.headers.set('Cache-Control', 'no-store');
     response.headers.set('X-Content-Type-Options', 'nosniff');
 
+    final origin = request.headers.value('origin');
+    if (origin != null && _isTrustedLocalWebOrigin(origin)) {
+      response.headers.set(HttpHeaders.accessControlAllowOriginHeader, origin);
+      response.headers.set(HttpHeaders.varyHeader, 'Origin');
+      response.headers.set(
+        HttpHeaders.accessControlAllowMethodsHeader,
+        'GET, PUT, DELETE, OPTIONS',
+      );
+      response.headers.set(
+        HttpHeaders.accessControlAllowHeadersHeader,
+        'Authorization, Content-Type, Content-Range',
+      );
+      response.headers.set(
+        HttpHeaders.accessControlExposeHeadersHeader,
+        'Content-Disposition, Content-Length, Content-Range, Accept-Ranges',
+      );
+      response.headers.set(HttpHeaders.accessControlMaxAgeHeader, '600');
+    }
+
     try {
+      if (request.method == 'OPTIONS') {
+        if (origin == null || !_isTrustedLocalWebOrigin(origin)) {
+          response.statusCode = HttpStatus.forbidden;
+        } else {
+          response.statusCode = HttpStatus.noContent;
+        }
+        await response.close();
+        return;
+      }
+
       final path = request.uri.path;
 
       // The browser page requires the one-time session token.
@@ -193,6 +269,35 @@ class TransferServer extends ChangeNotifier {
         return;
       }
 
+      if (path == '/api/v1/transfers' && request.method == 'POST') {
+        await _createResumableTransfer(request);
+        return;
+      }
+
+      final transferPath = RegExp(
+        r'^/api/v1/transfers/([a-f0-9]{32})(?:/(complete))?$',
+      ).firstMatch(path);
+      if (transferPath != null) {
+        final id = transferPath.group(1)!;
+        final action = transferPath.group(2);
+        if (request.method == 'GET' && action == null) {
+          await _getResumableTransfer(request, id);
+          return;
+        }
+        if (request.method == 'PUT' && action == null) {
+          await _writeTransferChunk(request, id);
+          return;
+        }
+        if (request.method == 'POST' && action == 'complete') {
+          await _completeResumableTransfer(request, id);
+          return;
+        }
+        if (request.method == 'DELETE' && action == null) {
+          await _cancelResumableTransfer(request, id);
+          return;
+        }
+      }
+
       response.statusCode = HttpStatus.notFound;
       response.write('Not found');
       await response.close();
@@ -215,6 +320,15 @@ class TransferServer extends ChangeNotifier {
     }
   }
 
+  bool _isTrustedLocalWebOrigin(String origin) {
+    final uri = Uri.tryParse(origin);
+    if (uri == null || uri.scheme != 'http' || !uri.hasAuthority) return false;
+
+    if (uri.host.toLowerCase() == 'localhost') return true;
+    final address = InternetAddress.tryParse(uri.host);
+    return address != null && address.isLoopback;
+  }
+
   Future<void> _sendJson(
     HttpResponse response,
     Map<String, Object?> data,
@@ -222,6 +336,343 @@ class TransferServer extends ChangeNotifier {
     response.headers.contentType = ContentType.json;
     response.write(jsonEncode(data));
     await response.close();
+  }
+
+  Future<void> _loadPendingTransfers() async {
+    final partialDirectory = _partialDirectory;
+    if (partialDirectory == null) return;
+
+    await for (final entry in partialDirectory.list()) {
+      if (entry is! File || !entry.path.endsWith('.json')) continue;
+      try {
+        final data =
+            jsonDecode(await entry.readAsString()) as Map<String, dynamic>;
+        final transfer = _PendingTransfer.fromJson(data);
+        final part = _partFile(transfer.id);
+        if (transfer.id !=
+                entry.uri.pathSegments.last.replaceFirst('.json', '') ||
+            !await part.exists() ||
+            await part.length() > transfer.size) {
+          await entry.delete();
+          if (await part.exists()) await part.delete();
+          continue;
+        }
+        _pendingTransfers[transfer.id] = transfer;
+      } catch (_) {
+        try {
+          await entry.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  File _partFile(String id) => File('${_partialDirectory!.path}/$id.part');
+  File _transferMetadataFile(String id) =>
+      File('${_partialDirectory!.path}/$id.json');
+
+  Future<void> _savePendingTransfer(_PendingTransfer transfer) async {
+    final metadata = _transferMetadataFile(transfer.id);
+    final temporary = File('${metadata.path}.tmp');
+    await temporary.writeAsString(jsonEncode(transfer.toJson()), flush: true);
+    if (await metadata.exists()) await metadata.delete();
+    await temporary.rename(metadata.path);
+  }
+
+  Future<void> _createResumableTransfer(HttpRequest request) async {
+    final body = await _readSmallJson(request, maxBytes: 16 * 1024);
+    final nameValue = body['name'];
+    final sizeValue = body['size'];
+    final clientIdValue = body['clientId'];
+    if (nameValue is! String ||
+        sizeValue is! int ||
+        clientIdValue is! String ||
+        clientIdValue.isEmpty ||
+        clientIdValue.length > 256 ||
+        sizeValue < 0) {
+      await _sendError(
+        request.response,
+        HttpStatus.badRequest,
+        'invalid_transfer',
+        'Invalid transfer metadata.',
+      );
+      return;
+    }
+
+    final name = _safeName(nameValue);
+    _PendingTransfer? existing;
+    for (final candidate in _pendingTransfers.values) {
+      if (candidate.clientId == clientIdValue) {
+        existing = candidate;
+        break;
+      }
+    }
+    if (existing != null) {
+      if (existing.name != name || existing.size != sizeValue) {
+        await _sendError(
+          request.response,
+          HttpStatus.conflict,
+          'client_id_conflict',
+          'This transfer key belongs to different file metadata.',
+        );
+        return;
+      }
+      await _sendTransferStatus(request.response, existing);
+      return;
+    }
+
+    final id = List<int>.generate(
+      16,
+      (_) => Random.secure().nextInt(256),
+    ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    final transfer = _PendingTransfer(
+      id: id,
+      clientId: clientIdValue,
+      name: name,
+      size: sizeValue,
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+    );
+    await _partFile(id).create();
+    _pendingTransfers[id] = transfer;
+    await _savePendingTransfer(transfer);
+    await _sendTransferStatus(
+      request.response,
+      transfer,
+      statusCode: HttpStatus.created,
+    );
+  }
+
+  Future<Map<String, dynamic>> _readSmallJson(
+    HttpRequest request, {
+    required int maxBytes,
+  }) async {
+    final builder = BytesBuilder(copy: false);
+    var length = 0;
+    await for (final chunk in request) {
+      length += chunk.length;
+      if (length > maxBytes) {
+        throw const FormatException('Request body is too large.');
+      }
+      builder.add(chunk);
+    }
+    final decoded = jsonDecode(utf8.decode(builder.takeBytes()));
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Expected a JSON object.');
+    }
+    return decoded;
+  }
+
+  Future<void> _sendTransferStatus(
+    HttpResponse response,
+    _PendingTransfer transfer, {
+    int statusCode = HttpStatus.ok,
+  }) async {
+    response.statusCode = statusCode;
+    await _sendJson(response, {
+      'transferId': transfer.id,
+      'name': transfer.name,
+      'size': transfer.size,
+      'offset': await _partFile(transfer.id).length(),
+      'chunkSize': chunkSize,
+      'state': 'receiving',
+      'createdAt': transfer.createdAt,
+    });
+  }
+
+  Future<void> _getResumableTransfer(HttpRequest request, String id) async {
+    final transfer = _pendingTransfers[id];
+    if (transfer == null) {
+      await _sendError(
+        request.response,
+        HttpStatus.notFound,
+        'transfer_not_found',
+        'Transfer was not found.',
+      );
+      return;
+    }
+    await _sendTransferStatus(request.response, transfer);
+  }
+
+  Future<void> _writeTransferChunk(HttpRequest request, String id) async {
+    final transfer = _pendingTransfers[id];
+    if (transfer == null) {
+      await _sendError(
+        request.response,
+        HttpStatus.notFound,
+        'transfer_not_found',
+        'Transfer was not found.',
+      );
+      return;
+    }
+    if (_activeTransferWrites.contains(id)) {
+      await _sendError(
+        request.response,
+        HttpStatus.conflict,
+        'transfer_busy',
+        'A chunk for this transfer is already being written.',
+      );
+      return;
+    }
+
+    final range = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$')
+        .firstMatch(request.headers.value('content-range') ?? '');
+    if (range == null) {
+      await _sendError(
+        request.response,
+        HttpStatus.badRequest,
+        'invalid_range',
+        'A valid Content-Range header is required.',
+      );
+      return;
+    }
+    final start = int.parse(range.group(1)!);
+    final end = int.parse(range.group(2)!);
+    final total = int.parse(range.group(3)!);
+    final chunkLength = end - start + 1;
+    final part = _partFile(id);
+    final currentOffset = await part.length();
+    if (total != transfer.size ||
+        start != currentOffset ||
+        end < start ||
+        chunkLength > chunkSize ||
+        end >= total ||
+        (request.contentLength >= 0 && request.contentLength != chunkLength)) {
+      await _sendError(
+        request.response,
+        HttpStatus.conflict,
+        'invalid_offset',
+        'Chunk range does not match the current transfer offset.',
+      );
+      return;
+    }
+
+    _activeTransferWrites.add(id);
+    final sink = part.openWrite(mode: FileMode.append);
+    var written = 0;
+    try {
+      await for (final bytes in request) {
+        written += bytes.length;
+        if (written > chunkLength) {
+          throw const FormatException('Chunk body exceeds its declared range.');
+        }
+        sink.add(bytes);
+      }
+      await sink.flush();
+      await sink.close();
+      if (written != chunkLength) {
+        throw const FormatException(
+          'Chunk body is shorter than its declared range.',
+        );
+      }
+      final offset = await part.length();
+      await _savePendingTransfer(transfer);
+      await _sendJson(request.response, {
+        'transferId': id,
+        'offset': offset,
+        'state': 'receiving',
+      });
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      try {
+        await request.response.close();
+      } catch (_) {}
+    } finally {
+      _activeTransferWrites.remove(id);
+    }
+  }
+
+  Future<void> _completeResumableTransfer(
+    HttpRequest request,
+    String id,
+  ) async {
+    final transfer = _pendingTransfers[id];
+    if (transfer == null) {
+      await _sendError(
+        request.response,
+        HttpStatus.notFound,
+        'transfer_not_found',
+        'Transfer was not found.',
+      );
+      return;
+    }
+    if (_activeTransferWrites.contains(id)) {
+      await _sendError(
+        request.response,
+        HttpStatus.conflict,
+        'transfer_busy',
+        'A chunk is still being written.',
+      );
+      return;
+    }
+    final part = _partFile(id);
+    final size = await part.length();
+    if (size != transfer.size) {
+      await _sendError(
+        request.response,
+        HttpStatus.conflict,
+        'incomplete_transfer',
+        'The uploaded file is incomplete.',
+      );
+      return;
+    }
+    final digest = await sha256.bind(part.openRead()).first;
+    final destination = await _uniqueDestination(transfer.name);
+    final saved = await part.rename(destination.path);
+    final savedName = saved.uri.pathSegments.last;
+    final metadata = _transferMetadataFile(id);
+    if (await metadata.exists()) await metadata.delete();
+    _pendingTransfers.remove(id);
+    _recordActivity('received', savedName, size);
+    await refreshFiles();
+    await _sendJson(request.response, {
+      'success': true,
+      'transferId': id,
+      'name': savedName,
+      'size': size,
+      'sha256': digest.toString(),
+    });
+  }
+
+  Future<void> _cancelResumableTransfer(HttpRequest request, String id) async {
+    if (_activeTransferWrites.contains(id)) {
+      await _sendError(
+        request.response,
+        HttpStatus.conflict,
+        'transfer_busy',
+        'Abort the active chunk before cancelling the transfer.',
+      );
+      return;
+    }
+    final transfer = _pendingTransfers.remove(id);
+    if (transfer == null) {
+      await _sendError(
+        request.response,
+        HttpStatus.notFound,
+        'transfer_not_found',
+        'Transfer was not found.',
+      );
+      return;
+    }
+    final part = _partFile(id);
+    final metadata = _transferMetadataFile(id);
+    if (await part.exists()) await part.delete();
+    if (await metadata.exists()) await metadata.delete();
+    await _sendJson(request.response, {
+      'success': true,
+      'transferId': id,
+      'state': 'cancelled',
+    });
+  }
+
+  Future<void> _sendError(
+    HttpResponse response,
+    int status,
+    String code,
+    String message,
+  ) async {
+    response.statusCode = status;
+    await _sendJson(response, {'error': message, 'code': code});
   }
 
   String _safeName(String input) {
@@ -297,6 +748,11 @@ class TransferServer extends ChangeNotifier {
 
       final digest = await sha256.bind(temporary.openRead()).first;
       final savedFile = await temporary.rename(destination.path);
+      _recordActivity(
+        'received',
+        savedFile.uri.pathSegments.last,
+        await savedFile.length(),
+      );
 
       await refreshFiles();
 
@@ -336,14 +792,43 @@ class TransferServer extends ChangeNotifier {
       return;
     }
 
+    final length = await file.length();
+    final requestedRange = request.headers.value(HttpHeaders.rangeHeader);
+    var start = 0;
+    var end = length == 0 ? 0 : length - 1;
+    if (requestedRange != null) {
+      final match = RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(requestedRange);
+      if (match == null || length == 0) {
+        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        request.response.headers.set('Content-Range', 'bytes */$length');
+        await request.response.close();
+        return;
+      }
+      start = int.parse(match.group(1)!);
+      end = match.group(2)!.isEmpty ? length - 1 : int.parse(match.group(2)!);
+      if (start >= length || end < start) {
+        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        request.response.headers.set('Content-Range', 'bytes */$length');
+        await request.response.close();
+        return;
+      }
+      end = min(end, length - 1);
+      request.response.statusCode = HttpStatus.partialContent;
+      request.response.headers.set(
+        'Content-Range',
+        'bytes $start-$end/$length',
+      );
+    }
+
+    request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
     request.response.headers.contentType = ContentType.binary;
     request.response.headers.set(
       'Content-Disposition',
       "attachment; filename*=UTF-8''${Uri.encodeComponent(safeName)}",
     );
-    request.response.headers.contentLength = await file.length();
+    request.response.headers.contentLength = end - start + 1;
 
-    await file.openRead().pipe(request.response);
+    await file.openRead(start, end + 1).pipe(request.response);
   }
 
   Future<void> _deleteFile(HttpRequest request) async {
@@ -367,7 +852,9 @@ class TransferServer extends ChangeNotifier {
       return;
     }
 
+    final size = await file.length();
     await file.delete();
+    _recordActivity('deleted', safeName, size);
     await refreshFiles();
 
     await _sendJson(request.response, {'success': true});
@@ -424,7 +911,12 @@ class TransferServer extends ChangeNotifier {
       if (!await source.exists()) continue;
 
       final destination = await _uniqueDestination(picked.name);
-      await source.copy(destination.path);
+      final copiedFile = await source.copy(destination.path);
+      _recordActivity(
+        'added',
+        copiedFile.uri.pathSegments.last,
+        await copiedFile.length(),
+      );
       copied++;
     }
 
@@ -439,7 +931,9 @@ class TransferServer extends ChangeNotifier {
     final file = File('${directory.path}/$safeName');
 
     if (await file.exists()) {
+      final size = await file.length();
       await file.delete();
+      _recordActivity('deleted', safeName, size);
       await refreshFiles();
     }
   }
@@ -595,4 +1089,37 @@ refreshFiles();
 </body>
 </html>
 ''';
+}
+
+class _PendingTransfer {
+  const _PendingTransfer({
+    required this.id,
+    required this.clientId,
+    required this.name,
+    required this.size,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String clientId;
+  final String name;
+  final int size;
+  final String createdAt;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'clientId': clientId,
+    'name': name,
+    'size': size,
+    'createdAt': createdAt,
+  };
+
+  factory _PendingTransfer.fromJson(Map<String, dynamic> json) =>
+      _PendingTransfer(
+        id: json['id'] as String,
+        clientId: json['clientId'] as String,
+        name: json['name'] as String,
+        size: json['size'] as int,
+        createdAt: json['createdAt'] as String,
+      );
 }

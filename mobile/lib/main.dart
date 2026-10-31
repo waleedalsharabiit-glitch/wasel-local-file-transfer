@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'screens/share_center.dart';
 import 'screens/transfer_center.dart';
+import 'services/transfer_server.dart';
 
 void main() {
   runApp(const WaselApp());
@@ -125,6 +127,23 @@ class WaselHome extends StatefulWidget {
 
 class _WaselHomeState extends State<WaselHome> {
   int _selectedIndex = 0;
+  final TransferServer _server = TransferServer.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _server.addListener(_refreshFromServer);
+  }
+
+  @override
+  void dispose() {
+    _server.removeListener(_refreshFromServer);
+    super.dispose();
+  }
+
+  void _refreshFromServer() {
+    if (mounted) setState(() {});
+  }
 
   String t(String ar, String en) => widget.isEnglish ? en : ar;
 
@@ -141,6 +160,7 @@ class _WaselHomeState extends State<WaselHome> {
       _buildDevices(),
       _buildTransfers(),
       _buildHistory(),
+      ShareCenter(isEnglish: widget.isEnglish),
       _buildSettings(),
     ];
 
@@ -185,6 +205,11 @@ class _WaselHomeState extends State<WaselHome> {
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: t('تغيير اللغة', 'Toggle language'),
+              onPressed: widget.onToggleLanguage,
+              icon: const Icon(Icons.translate_rounded),
+            ),
             IconButton(
               tooltip: t('تغيير المظهر', 'Toggle theme'),
               onPressed: widget.onToggleTheme,
@@ -231,6 +256,11 @@ class _WaselHomeState extends State<WaselHome> {
             NavigationDestination(
               icon: const Icon(Icons.history_rounded),
               label: t('السجل', 'History'),
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.forum_outlined),
+              selectedIcon: const Icon(Icons.forum_rounded),
+              label: t('مشاركة', 'Share'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.settings_outlined),
@@ -324,7 +354,7 @@ class _WaselHomeState extends State<WaselHome> {
                     ),
                   ),
                   onPressed: () => setState(() => _selectedIndex = 1),
-                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  icon: const Icon(Icons.link_rounded),
                   label: Text(
                     t('إعداد اتصال جديد', 'Set up a connection'),
                     style: const TextStyle(fontWeight: FontWeight.w800),
@@ -343,8 +373,10 @@ class _WaselHomeState extends State<WaselHome> {
               child: _statCard(
                 icon: Icons.devices_rounded,
                 title: t('الأجهزة', 'Devices'),
-                value: '0',
-                subtitle: t('لا توجد أجهزة مقترنة', 'No paired devices'),
+                value: _server.isRunning ? '1' : '0',
+                subtitle: _server.isRunning
+                    ? t('جلسة محلية نشطة', 'Local session active')
+                    : t('ابدأ جلسة محلية', 'Start a local session'),
                 color: const Color(0xFF0284C7),
               ),
             ),
@@ -353,8 +385,8 @@ class _WaselHomeState extends State<WaselHome> {
               child: _statCard(
                 icon: Icons.swap_vert_rounded,
                 title: t('عمليات النقل', 'Transfers'),
-                value: '0',
-                subtitle: t('لم تبدأ أي عمليات بعد', 'No transfers yet'),
+                value: '${_server.activity.length}',
+                subtitle: t('عملية في هذه الجلسة', 'events this session'),
                 color: const Color(0xFF16A34A),
               ),
             ),
@@ -402,14 +434,22 @@ class _WaselHomeState extends State<WaselHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        t('جاهز للإعداد', 'Ready to configure'),
+                        _server.isRunning
+                            ? t(
+                                'الاتصال المحلي نشط',
+                                'Local connection is active',
+                              )
+                            : t(
+                                'ملفاتك تبقى على أجهزتك',
+                                'Your files stay on your devices',
+                              ),
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 5),
                       Text(
                         t(
-                          'هذه واجهة المرحلة الثانية. لم يبدأ خادم النقل المحلي بعد.',
-                          'This is the phase-two interface. The local transfer server is not implemented yet.',
+                          'النقل يتم عبر شبكة Wi-Fi أو نقطة الاتصال؛ لا حاجة إلى خادم سحابي.',
+                          'Transfers use Wi-Fi or a phone hotspot; no cloud server is required.',
                         ),
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -429,32 +469,136 @@ class _WaselHomeState extends State<WaselHome> {
   }
 
   Widget _buildDevices() {
-    return const TransferCenter(connectionMode: true);
+    return TransferCenter(connectionMode: true, isEnglish: widget.isEnglish);
   }
 
   Widget _buildTransfers() {
-    return const TransferCenter(connectionMode: false);
+    return TransferCenter(connectionMode: false, isEnglish: widget.isEnglish);
   }
 
   Widget _buildHistory() {
+    final activity = _server.activity;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _pageHeading(
           t('سجل العمليات', 'Transfer history'),
-          t('الملفات والعمليات السابقة.', 'Previous files and operations.'),
+          t('نشاط هذه الجلسة على الهاتف.', 'Activity from this phone session.'),
         ),
         const SizedBox(height: 18),
-        _emptyCard(
-          Icons.history_rounded,
-          t('السجل فارغ', 'History is empty'),
+        Row(
+          children: [
+            Expanded(
+              child: _statCard(
+                icon: Icons.swap_horiz_rounded,
+                title: t('العمليات', 'Operations'),
+                value: '${activity.length}',
+                subtitle: t('في الجلسة الحالية', 'This session'),
+                color: const Color(0xFF0284C7),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _statCard(
+                icon: Icons.folder_copy_outlined,
+                title: t('المكتبة', 'Library'),
+                value: '${_server.files.length}',
+                subtitle: t('ملفات متاحة الآن', 'Files available now'),
+                color: const Color(0xFF16A34A),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 15),
+        if (activity.isEmpty)
+          _emptyCard(
+            Icons.history_rounded,
+            t('لا توجد عمليات بعد', 'No activity yet'),
+            t(
+              'ستظهر هنا الملفات التي أُضيفت أو استُقبلت أو حُذفت خلال جلسة التطبيق الحالية.',
+              'Files added, received, or deleted during the current app session will appear here.',
+            ),
+          )
+        else
+          Card(
+            child: Column(
+              children: [
+                for (var index = 0; index < activity.length; index++)
+                  _activityTile(
+                    activity[index],
+                    last: index == activity.length - 1,
+                  ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 12),
+        Text(
           t(
-            'ستُسجّل العمليات الفعلية بعد تنفيذ محرك النقل.',
-            'Completed operations will appear after the transfer engine is implemented.',
+            'يعرض السجل نشاط الجلسة الحالية فقط. حفظ سجل دائم سيضاف لاحقًا.',
+            'This view shows current-session activity only. Persistent history will be added later.',
+          ),
+          style: TextStyle(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       ],
     );
+  }
+
+  Widget _activityTile(Map<String, Object?> event, {required bool last}) {
+    final action = event['action'] as String? ?? '';
+    final title = switch (action) {
+      'received' => t('تم الاستلام', 'Received'),
+      'added' => t('أُضيف من الهاتف', 'Added from phone'),
+      'deleted' => t('تم الحذف', 'Deleted'),
+      _ => t('عملية ملف', 'File activity'),
+    };
+    final icon = action == 'deleted'
+        ? Icons.delete_outline_rounded
+        : action == 'received'
+        ? Icons.call_received_rounded
+        : Icons.add_to_drive_rounded;
+    final date = DateTime.tryParse(event['timestamp'] as String? ?? '')
+        ?.toLocal();
+    final dateLabel = date == null
+        ? ''
+        : '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    return Column(
+      children: [
+        ListTile(
+          leading: CircleAvatar(
+            backgroundColor: const Color(0xFF0284C7).withValues(alpha: .1),
+            child: Icon(icon, color: const Color(0xFF0284C7)),
+          ),
+          title: Text(
+            event['name'] as String? ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+          ),
+          subtitle: Text('$title · ${_formatSize(event['size'])}'),
+          trailing: Text(
+            dateLabel,
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        if (!last) const Divider(height: 1, indent: 72),
+      ],
+    );
+  }
+
+  String _formatSize(Object? value) {
+    final bytes = (value as num?)?.toInt() ?? 0;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
 
   Widget _buildSettings() {
