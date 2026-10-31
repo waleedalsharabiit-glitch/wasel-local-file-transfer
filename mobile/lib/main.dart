@@ -37,7 +37,7 @@ class _WaselAppState extends State<WaselApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Wasel | ظˆط§طµظ„',
+      title: 'Wasel | واصل',
       locale: _locale,
       themeMode: _themeMode,
       theme: _buildTheme(Brightness.light),
@@ -174,10 +174,7 @@ class _WaselHomeState extends State<WaselHome> {
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19),
                   ),
                   Text(
-                    t(
-                      'ظˆط§طµظ„ â€¢ ظ†ظ‚ظ„ ظ…ط­ظ„ظٹ ط¢ظ…ظ†',
-                      'Wasel â€¢ Local file transfer',
-                    ),
+                    t('واصل • نقل محلي آمن', 'Wasel • Local file transfer'),
                     style: TextStyle(
                       fontSize: 11,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -189,7 +186,7 @@ class _WaselHomeState extends State<WaselHome> {
           ),
           actions: [
             IconButton(
-              tooltip: t('طھط؛ظٹظٹط± ط§ظ„ظ…ط¸ظ‡ط±', 'Toggle theme'),
+              tooltip: t('تغيير المظهر', 'Toggle theme'),
               onPressed: widget.onToggleTheme,
               icon: Icon(
                 widget.isDark
@@ -219,26 +216,26 @@ class _WaselHomeState extends State<WaselHome> {
             NavigationDestination(
               icon: const Icon(Icons.home_outlined),
               selectedIcon: const Icon(Icons.home_rounded),
-              label: t('ط§ظ„ط±ط¦ظٹط³ظٹط©', 'Home'),
+              label: t('الرئيسية', 'Home'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.devices_outlined),
               selectedIcon: const Icon(Icons.devices_rounded),
-              label: t('ط§ظ„ط£ط¬ظ‡ط²ط©', 'Devices'),
+              label: t('الأجهزة', 'Devices'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.swap_horiz_rounded),
               selectedIcon: const Icon(Icons.sync_alt_rounded),
-              label: t('ط§ظ„ظ†ظ‚ظ„', 'Transfer'),
+              label: t('النقل', 'Transfer'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.history_rounded),
-              label: t('ط§ظ„ط³ط¬ظ„', 'History'),
+              label: t('السجل', 'History'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.settings_outlined),
               selectedIcon: const Icon(Icons.settings_rounded),
-              label: t('ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ', 'Settings'),
+              label: t('الإعدادات', 'Settings'),
             ),
           ],
         ),
@@ -284,7 +281,7 @@ class _WaselHomeState extends State<WaselHome> {
                     const SizedBox(width: 6),
                     Text(
                       t(
-                        'ظ†ظ‚ظ„ ظ…ط­ظ„ظٹ ط¨ظٹظ† ط£ط¬ظ‡ط²طھظƒ',
+                        'نقل محلي بين أجهزتك',
                         'Local transfer between devices',
                       ),
                       style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -294,10 +291,7 @@ class _WaselHomeState extends State<WaselHome> {
               ),
               const SizedBox(height: 20),
               Text(
-                t(
-                  'ظ…ظ„ظپط§طھظƒطŒ\\nطھطµظ„ ط¨ط³ظ‡ظˆظ„ط©.',
-                  'Your files,\\nwithin easy reach.',
-                ),
+                t('ملفاتك،\\nتصل بسهولة.', 'Your files,\\nwithin easy reach.'),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 31,
@@ -308,7 +302,7 @@ class _WaselHomeState extends State<WaselHome> {
               const SizedBox(height: 9),
               Text(
                 t(
-                  'ط¬ظ‡ظ‘ط² ط§ظ„ط§طھطµط§ظ„ ط¨ظٹظ† ط§ظ„ظ‡ط§طھظپ ظˆط§ظ„ظƒظ…ط¨ظٹظˆطھط± ظ„ظ†ظ‚ظ„ ظ…ظ„ظپط§طھظƒ ط¹ط¨ط± ط§ظ„ط´ط¨ظƒط© ط§ظ„ظ…ط­ظ„ظٹط©.',
+                  'جهّز الاتصال بين الهاتف والكمبيوتر لنقل ملفاتك عبر الشبكة المحلية.',
                   'Prepare a local connection between your phone and computer.',
                 ),
                 style: TextStyle(
@@ -332,7 +326,7 @@ class _WaselHomeState extends State<WaselHome> {
                   onPressed: () => setState(() => _selectedIndex = 1),
                   icon: const Icon(Icons.qr_code_scanner_rounded),
                   label: Text(
-                    t('ط¥ط¹ط¯ط§ط¯ ط§طھطµط§ظ„ ط¬ط¯ظٹط¯', 'Set up a connection'),
+                    t('إعداد اتصال جديد', 'Set up a connection'),
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -341,19 +335,16 @@ class _WaselHomeState extends State<WaselHome> {
           ),
         ),
         const SizedBox(height: 25),
-        _sectionTitle(t('ظ†ط¸ط±ط© ط¹ط§ظ…ط©', 'Overview')),
+        _sectionTitle(t('نظرة عامة', 'Overview')),
         const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
               child: _statCard(
                 icon: Icons.devices_rounded,
-                title: t('ط§ظ„ط£ط¬ظ‡ط²ط©', 'Devices'),
+                title: t('الأجهزة', 'Devices'),
                 value: '0',
-                subtitle: t(
-                  'ظ„ط§ طھظˆط¬ط¯ ط£ط¬ظ‡ط²ط© ظ…ظ‚طھط±ظ†ط©',
-                  'No paired devices',
-                ),
+                subtitle: t('لا توجد أجهزة مقترنة', 'No paired devices'),
                 color: const Color(0xFF0284C7),
               ),
             ),
@@ -361,27 +352,24 @@ class _WaselHomeState extends State<WaselHome> {
             Expanded(
               child: _statCard(
                 icon: Icons.swap_vert_rounded,
-                title: t('ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظ†ظ‚ظ„', 'Transfers'),
+                title: t('عمليات النقل', 'Transfers'),
                 value: '0',
-                subtitle: t(
-                  'ظ„ظ… طھط¨ط¯ط£ ط¹ظ…ظ„ظٹط§طھ ط¨ط¹ط¯',
-                  'No transfers yet',
-                ),
+                subtitle: t('لم تبدأ أي عمليات بعد', 'No transfers yet'),
                 color: const Color(0xFF16A34A),
               ),
             ),
           ],
         ),
         const SizedBox(height: 25),
-        _sectionTitle(t('ط§ظ„ظˆطµظˆظ„ ط§ظ„ط³ط±ظٹط¹', 'Quick access')),
+        _sectionTitle(t('الوصول السريع', 'Quick access')),
         const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
               child: _quickAction(
                 icon: Icons.upload_file_rounded,
-                title: t('ط¥ط±ط³ط§ظ„ ظ…ظ„ظپط§طھ', 'Send files'),
-                subtitle: t('ظ…ظ† ط§ظ„ظ‡ط§طھظپ', 'From phone'),
+                title: t('إرسال ملفات', 'Send files'),
+                subtitle: t('من الهاتف', 'From phone'),
                 onTap: () => setState(() => _selectedIndex = 2),
               ),
             ),
@@ -389,8 +377,8 @@ class _WaselHomeState extends State<WaselHome> {
             Expanded(
               child: _quickAction(
                 icon: Icons.folder_open_rounded,
-                title: t('ط§ط³طھظ‚ط¨ط§ظ„ ظ…ظ„ظپط§طھ', 'Receive files'),
-                subtitle: t('ظ…ظ† ط§ظ„ظƒظ…ط¨ظٹظˆطھط±', 'From computer'),
+                title: t('استقبال ملفات', 'Receive files'),
+                subtitle: t('من الكمبيوتر', 'From computer'),
                 onTap: () => setState(() => _selectedIndex = 1),
               ),
             ),
@@ -414,13 +402,13 @@ class _WaselHomeState extends State<WaselHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        t('ط¬ط§ظ‡ط² ظ„ظ„ط¥ط¹ط¯ط§ط¯', 'Ready to configure'),
+                        t('جاهز للإعداد', 'Ready to configure'),
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                       const SizedBox(height: 5),
                       Text(
                         t(
-                          'ظ‡ط°ظ‡ ظˆط§ط¬ظ‡ط© ط§ظ„ظ…ط±ط­ظ„ط© ط§ظ„ط«ط§ظ†ظٹط©. ظ„ظ… ظٹط¨ط¯ط£ ط®ط§ط¯ظ… ط§ظ„ظ†ظ‚ظ„ ط§ظ„ظ…ط­ظ„ظٹ ط¨ط¹ط¯.',
+                          'هذه واجهة المرحلة الثانية. لم يبدأ خادم النقل المحلي بعد.',
                           'This is the phase-two interface. The local transfer server is not implemented yet.',
                         ),
                         style: TextStyle(
@@ -453,18 +441,15 @@ class _WaselHomeState extends State<WaselHome> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _pageHeading(
-          t('ط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ', 'Transfer history'),
-          t(
-            'ط§ظ„ظ…ظ„ظپط§طھ ظˆط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ط³ط§ط¨ظ‚ط©.',
-            'Previous files and operations.',
-          ),
+          t('سجل العمليات', 'Transfer history'),
+          t('الملفات والعمليات السابقة.', 'Previous files and operations.'),
         ),
         const SizedBox(height: 18),
         _emptyCard(
           Icons.history_rounded,
-          t('ط§ظ„ط³ط¬ظ„ ظپط§ط±ط؛', 'History is empty'),
+          t('السجل فارغ', 'History is empty'),
           t(
-            'ط³طھظڈط³ط¬ظ„ ط§ظ„ط¹ظ…ظ„ظٹط§طھ ط§ظ„ظپط¹ظ„ظٹط© ط¨ط¹ط¯ طھظ†ظپظٹط° ظ…ط­ط±ظƒ ط§ظ„ظ†ظ‚ظ„.',
+            'ستُسجّل العمليات الفعلية بعد تنفيذ محرك النقل.',
             'Completed operations will appear after the transfer engine is implemented.',
           ),
         ),
@@ -477,11 +462,8 @@ class _WaselHomeState extends State<WaselHome> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _pageHeading(
-          t('ط§ظ„ط¥ط¹ط¯ط§ط¯ط§طھ ظˆط§ظ„ط®طµظˆطµظٹط©', 'Settings & privacy'),
-          t(
-            'ط®طµظ‘طµ طھط¬ط±ط¨ط© ظˆط§طµظ„.',
-            'Customize your Wasel experience.',
-          ),
+          t('الإعدادات والخصوصية', 'Settings & privacy'),
+          t('خصّص تجربة واصل.', 'Customize your Wasel experience.'),
         ),
         const SizedBox(height: 18),
         Card(
@@ -489,15 +471,15 @@ class _WaselHomeState extends State<WaselHome> {
             children: [
               ListTile(
                 leading: const Icon(Icons.language_rounded),
-                title: Text(t('ظ„ط؛ط© ط§ظ„طھط·ط¨ظٹظ‚', 'App language')),
-                subtitle: Text(widget.isEnglish ? 'English' : 'ط§ظ„ط¹ط±ط¨ظٹط©'),
+                title: Text(t('لغة التطبيق', 'App language')),
+                subtitle: Text(widget.isEnglish ? 'English' : 'العربية'),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: widget.onToggleLanguage,
               ),
               const Divider(height: 1),
               SwitchListTile(
                 secondary: const Icon(Icons.dark_mode_outlined),
-                title: Text(t('ط§ظ„ظ…ط¸ظ‡ط± ط§ظ„ط¯ط§ظƒظ†', 'Dark theme')),
+                title: Text(t('المظهر الداكن', 'Dark theme')),
                 value: widget.isDark,
                 onChanged: (_) => widget.onToggleTheme(),
               ),
@@ -505,28 +487,22 @@ class _WaselHomeState extends State<WaselHome> {
               ListTile(
                 leading: const Icon(Icons.verified_user_outlined),
                 title: Text(
-                  t(
-                    'ط§ظ„ط£ظ…ط§ظ† ظˆط§ظ„ط£ط¬ظ‡ط²ط© ط§ظ„ظ…ظˆط«ظˆظ‚ط©',
-                    'Security & trusted devices',
-                  ),
+                  t('الأمان والأجهزة الموثوقة', 'Security & trusted devices'),
                 ),
                 subtitle: Text(
-                  t(
-                    'ط§ظ„ط¥ظ‚ط±ط§ظ† ظˆط§ظ„طµظ„ط§ط­ظٹط§طھ',
-                    'Pairing and permissions',
-                  ),
+                  t('الإقران والصلاحيات', 'Pairing and permissions'),
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _showInfo(
-                  'ط³ظٹطھظ… طھظ†ظپظٹط° ط¥ط¹ط¯ط§ط¯ط§طھ ط§ظ„ط£ظ…ط§ظ† ظپظٹ ظ…ط±ط­ظ„ط© ط§ظ„ط¥ظ‚ط±ط§ظ†.',
+                  'سيتم تنفيذ إعدادات الأمان في مرحلة الإقران.',
                   'Security controls will be implemented in the pairing phase.',
                 ),
               ),
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.info_outline_rounded),
-                title: Text(t('ط­ظˆظ„ ظˆط§طµظ„', 'About Wasel')),
-                subtitle: const Text('Wasel â€¢ 0.1.0'),
+                title: Text(t('حول واصل', 'About Wasel')),
+                subtitle: const Text('Wasel • 0.1.0'),
               ),
             ],
           ),

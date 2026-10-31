@@ -451,7 +451,7 @@ class TransferServer extends ChangeNotifier {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0284c7">
-<title>Wasel â€” Local Transfer</title>
+<title>Wasel — Local Transfer</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f4f8fc;color:#0f172a;font-family:Arial,sans-serif}
@@ -493,7 +493,7 @@ progress{width:100%;height:12px;margin-top:14px}
 <section class="card">
 <h2>Files available on this phone</h2>
 <button class="secondary" id="refresh">Refresh list</button>
-<div id="files" class="empty">Loading filesâ€¦</div>
+<div id="files" class="empty">Loading files…</div>
 </section>
 </main>
 <script>
@@ -542,7 +542,7 @@ function upload(file){
   xhr.upload.onprogress=e=>{
    if(e.lengthComputable){
     progress.hidden=false;progress.value=e.loaded/e.total*100;
-    message('Uploading '+file.name+' â€” '+Math.round(progress.value)+'%');
+    message('Uploading '+file.name+' — '+Math.round(progress.value)+'%');
    }
   };
   xhr.onload=()=>{
