@@ -30,6 +30,7 @@ class TransferServer extends ChangeNotifier {
   Directory? _partialDirectory;
   static const int chunkSize = 4 * 1024 * 1024;
   final Map<String, _PendingTransfer> _pendingTransfers = {};
+  final Map<String, _DownloadTicket> _downloadTickets = {};
   final Set<String> _activeTransferWrites = {};
 
   String? _token;
@@ -161,6 +162,7 @@ class TransferServer extends ChangeNotifier {
     }
 
     _token = null;
+    _downloadTickets.clear();
     _url = null;
     _address = null;
     _port = null;
@@ -175,7 +177,22 @@ class TransferServer extends ChangeNotifier {
 
     final expected = 'Bearer $_token';
 
-    return _token != null && authorization == expected;
+    if (_token == null) return false;
+    if (authorization == expected) return true;
+
+    // Native browser downloads cannot attach Authorization headers. A short
+    // lived, file-scoped ticket lets the browser stream directly to disk.
+    if (request.method != 'GET' || request.uri.path != '/api/download') {
+      return false;
+    }
+    final ticketId = request.uri.queryParameters['ticket'];
+    final ticket = ticketId == null ? null : _downloadTickets[ticketId];
+    if (ticket == null) return false;
+    if (ticket.expiresAt.isBefore(DateTime.now().toUtc())) {
+      _downloadTickets.remove(ticketId);
+      return false;
+    }
+    return request.uri.queryParameters['name'] == ticket.name;
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
@@ -194,7 +211,7 @@ class TransferServer extends ChangeNotifier {
       );
       response.headers.set(
         HttpHeaders.accessControlAllowHeadersHeader,
-        'Authorization, Content-Type, Content-Range',
+        'Authorization, Content-Type, Content-Range, Range',
       );
       response.headers.set(
         HttpHeaders.accessControlExposeHeadersHeader,
@@ -261,6 +278,11 @@ class TransferServer extends ChangeNotifier {
 
       if (path == '/api/download' && request.method == 'GET') {
         await _downloadFile(request);
+        return;
+      }
+
+      if (path == '/api/download-ticket' && request.method == 'POST') {
+        await _createDownloadTicket(request);
         return;
       }
 
@@ -831,6 +853,45 @@ class TransferServer extends ChangeNotifier {
     await file.openRead(start, end + 1).pipe(request.response);
   }
 
+  Future<void> _createDownloadTicket(HttpRequest request) async {
+    final body = await _readSmallJson(request, maxBytes: 16 * 1024);
+    final requestedName = body['name'];
+    if (requestedName is! String || requestedName.isEmpty) {
+      await _sendError(
+        request.response,
+        HttpStatus.badRequest,
+        'invalid_file_name',
+        'A file name is required.',
+      );
+      return;
+    }
+    final name = _safeName(requestedName);
+    final file = File('${_directory!.path}/$name');
+    if (!await file.exists()) {
+      await _sendError(
+        request.response,
+        HttpStatus.notFound,
+        'file_not_found',
+        'File was not found.',
+      );
+      return;
+    }
+    final ticketId = List<int>.generate(
+      24,
+      (_) => Random.secure().nextInt(256),
+    ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    final now = DateTime.now().toUtc();
+    _downloadTickets.removeWhere((_, ticket) => ticket.expiresAt.isBefore(now));
+    _downloadTickets[ticketId] = _DownloadTicket(
+      name: name,
+      expiresAt: now.add(const Duration(minutes: 5)),
+    );
+    await _sendJson(request.response, {
+      'ticket': ticketId,
+      'expiresInSeconds': 300,
+    });
+  }
+
   Future<void> _deleteFile(HttpRequest request) async {
     final name = request.uri.queryParameters['name'];
 
@@ -1122,4 +1183,11 @@ class _PendingTransfer {
         size: json['size'] as int,
         createdAt: json['createdAt'] as String,
       );
+}
+
+class _DownloadTicket {
+  const _DownloadTicket({required this.name, required this.expiresAt});
+
+  final String name;
+  final DateTime expiresAt;
 }

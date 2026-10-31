@@ -38,12 +38,15 @@ void main() {
     Object? json,
     List<int>? bytes,
     Map<String, String> headers = const {},
+    bool authenticate = true,
   }) async {
     final request = await client.openUrl(method, endpoint(path));
-    request.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer ${server.token}',
-    );
+    if (authenticate) {
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer ${server.token}',
+      );
+    }
     headers.forEach(request.headers.set);
     if (json != null) {
       request.headers.contentType = ContentType.json;
@@ -101,11 +104,14 @@ void main() {
   test(
     'uploads in chunks, verifies SHA-256, and downloads a byte range',
     () async {
-      final bytes = List<int>.generate(800000, (index) => (index * 31) % 256);
+      final bytes = List<int>.generate(
+        TransferServer.chunkSize * 2 + 37,
+        (index) => (index * 31) % 256,
+      );
       final transfer = await createTransfer('sample.bin', bytes);
       final id = transfer['transferId'] as String;
 
-      await writeChunks(id, bytes);
+      await writeChunks(id, bytes, chunkSize: TransferServer.chunkSize);
       final completed = await send('POST', '/api/v1/transfers/$id/complete');
 
       expect(completed.status, HttpStatus.ok);
@@ -131,6 +137,27 @@ void main() {
         'bytes 12345-12399/${bytes.length}',
       );
       expect(range.bytes, bytes.sublist(12345, 12400));
+
+      final ticketResponse = await send(
+        'POST',
+        '/api/download-ticket',
+        json: {'name': 'sample.bin'},
+      );
+      final ticket = (jsonDecode(ticketResponse.body) as Map)['ticket'];
+      final ticketDownload = await send(
+        'GET',
+        '/api/download?name=sample.bin&ticket=$ticket',
+        authenticate: false,
+        headers: {'Range': 'bytes=0-15'},
+      );
+      expect(ticketDownload.status, HttpStatus.partialContent);
+      expect(ticketDownload.bytes, bytes.sublist(0, 16));
+      final wrongName = await send(
+        'GET',
+        '/api/download?name=another.bin&ticket=$ticket',
+        authenticate: false,
+      );
+      expect(wrongName.status, HttpStatus.unauthorized);
     },
   );
 

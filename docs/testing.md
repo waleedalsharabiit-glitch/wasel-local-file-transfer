@@ -1,4 +1,4 @@
-﻿# Wasel Test Plan
+# Wasel Test Plan
 
 ## Environment
 - [ ] Flutter doctor Android toolchain has no blocking errors.
@@ -7,10 +7,15 @@
 - [ ] Browser project installs dependencies and builds successfully.
 
 ## Transfer engine
-- [ ] Small file in each direction.
-- [ ] Large file without loading the complete file into memory.
-- [ ] Interrupted transfer and resume.
-- [ ] SHA-256 matches at source and destination.
+- [x] Resumable 4 MiB chunk upload over loopback HTTP; final SHA-256 is returned and checked.
+- [x] Byte-range download over loopback HTTP.
+- [x] Native-download ticket remains limited to the named file.
+- [x] Interrupted upload resumes at the server-reported offset, including after server restart.
+- [x] Invalid offset rejection, transfer cancellation, and two independent concurrent transfers.
+- [ ] Small file in each direction on a physical phone and computer.
+- [ ] Large file without loading the complete file into memory on physical devices.
+- [ ] Abrupt real network interruption and resume on Wi-Fi and hotspot.
+- [ ] Independently hash source and downloaded destination on physical devices.
 - [ ] Duplicate filenames and conflict resolution.
 - [ ] Insufficient storage and permission-denied handling.
 - [ ] Invalid paths and path traversal attempts.

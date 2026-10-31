@@ -1,50 +1,42 @@
-﻿# Wasel Local API Contract — Draft
+# Wasel Local API Contract — v1 transfer endpoints
 
-Status: draft only. These endpoints are proposed and are not implemented yet.
+Status: implemented for local file transfer. Pairing, folder permissions, and event streaming remain future work.
 
 ## General rules
 
-- All endpoints are available only while the user starts the receiving service.
-- Requests must be authorized using the active pairing session.
-- The server must validate the request origin, authorization, input size, and path.
-- Do not accept arbitrary filesystem paths from a peer.
+- Endpoints are available while the user starts the receiving service.
+- Requests use the active session bearer token.
+- The server validates origin, authorization, size, and filenames; peers never provide filesystem paths.
 
-## Proposed endpoints
-
-### GET /api/v1/status
-Returns service status, protocol version, and available capabilities.
-
-### POST /api/v1/pairing/request
-Requests pairing. Requires a valid, unexpired pairing code.
-
-### POST /api/v1/pairing/approve
-Approves or rejects a pending pairing request. Approval must be user-controlled.
-
-### GET /api/v1/files
-Lists only files and folders the user has explicitly granted access to.
+## Transfer endpoints
 
 ### POST /api/v1/transfers
-Creates a transfer request and returns a transfer identifier.
-
-### PUT /api/v1/transfers/{transferId}/content
-Streams file bytes or a bounded chunk. Requires transfer authorization.
+JSON body: `{ "name": string, "size": integer, "clientId": string }`. Creates a transfer (or returns the existing transfer for that client id). Response includes `transferId`, `chunkSize` (4 MiB), and current `offset`.
 
 ### GET /api/v1/transfers/{transferId}
-Returns transfer status and resumable offset when supported.
+Returns state, authoritative byte `offset`, total `size`, `chunkSize`, and filename. Query this after reconnect or interruption.
+
+### PUT /api/v1/transfers/{transferId}
+Appends one bounded binary chunk. `Content-Range` must be `bytes {offset}-{endInclusive}/{total}` and start at the server's current offset. A chunk is at most 4 MiB.
+
+### POST /api/v1/transfers/{transferId}/complete
+Verifies byte count, commits the file to the receive directory, and returns its SHA-256 digest.
 
 ### DELETE /api/v1/transfers/{transferId}
-Cancels a transfer when permitted.
+Cancels and removes a partial transfer. An active chunk must finish or abort before cancellation succeeds.
 
-### WebSocket /api/v1/events
-Publishes authorized transfer progress and connection events.
+### GET /api/download?name={name}
+Supports a single `Range: bytes=start-end` with `206`, `Content-Range`, and `Accept-Ranges`, enabling bounded-memory downloads.
 
-## Required future fields
+### POST /api/download-ticket
+Authenticated JSON body `{ "name": string }`. Returns a random file-scoped ticket valid for five minutes. The browser may use it for a native attachment download when the browser does not allow direct-to-disk APIs on the local HTTP origin. Tickets cannot authorize any endpoint other than downloading their named file.
 
-- Protocol version.
-- Transfer identifier.
-- File size and chunk metadata.
-- Resume offset.
-- Expected SHA-256.
-- Transfer state and error code.
+## Compatibility and semantics
 
-The final schema must be versioned and tested before implementation.
+- Existing `/api/status`, `/api/files`, `/api/download`, `/api/upload`, and file deletion routes remain available to the mobile app and older web clients.
+- Browser uploads at most two files concurrently and sends one chunk per file at a time.
+- Repeating create with the same `clientId` returns the pending transfer. The browser queries its status and resumes at the server-reported offset.
+- Partial data and metadata live in the hidden `.partials` directory and are reloaded after server restart.
+- Final SHA-256 is computed on the phone after all bytes arrive.
+- Browser downloads use a bounded range writer where supported; otherwise a scoped ticket lets the browser download the streamed attachment directly without buffering the complete file in the web page.
+- Device discovery, user-approved pairing, expected source hashes, and live event streaming remain future work.
